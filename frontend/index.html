@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WareOnGo RFQ Parser</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <h1>WareOnGo RFQ Parser</h1>
+    <p class="subtitle">Paste an RFQ message to parse it into a CRM opportunity</p>
+
+    <textarea id="rfqInput" placeholder="RFQ in Bangalore&#10;&#10;Location: HSR layout&#10;Size: 5000-10000 sqft&#10;Budget: 100/sft&#10;Person: John Smith&#10;Number: 9876543210"></textarea>
+
+    <div class="actions">
+      <button id="submitBtn">Parse RFQ</button>
+      <span id="status" class="status"></span>
+    </div>
+
+    <div id="result" class="result">
+      <h2>Parsed Opportunity</h2>
+      <div id="fields" class="fields"></div>
+      <button class="json-toggle" id="jsonToggle">Show raw JSON</button>
+      <pre id="jsonOutput"></pre>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
