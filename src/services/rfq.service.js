@@ -5,21 +5,20 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const opportunitySchema = {
   type: "object",
   properties: {
-    name: { type: "string", description: "Format: 'Size - Location, City (ClientName)'. E.g. '5,000-10,000 sqft - HSR Layout, Bangalore (Acme Corp)'. NEVER prefix with deal type like 'Warehouse RFQ'. Use TBD for unknown parts." },
+    name: { type: "string", description: "Format: 'Company - Space - Area, City'. E.g. 'Acme Corp - 5,000 sqft - HSR Layout, Bangalore'. Use TBD for unknown parts." },
     amount: {
       type: "object",
       properties: {
-        amountMicros: { type: "string", description: "Budget amount as a plain number string — either total budget or rate per sqft, whichever is mentioned. E.g. Rs 2,20,000 → \"220000\", Rs 25/sqft → \"25\". Use \"0\" if not mentioned." },
+        amountMicros: { type: "string", description: "Total deal size as a plain number string. E.g. Rs 2,20,000 → \"220000\". 5 lakhs → \"500000\". Use \"0\" if total deal size is not explicitly mentioned." },
         currencyCode: { type: "string", enum: ["INR", "USD", "EUR"] },
       },
       required: ["amountMicros", "currencyCode"],
       additionalProperties: false,
     },
-    closeDate: { type: "string", description: "Possession/close date in ISO 8601 format. If not mentioned, use empty string." },
-    stage: { type: "string", enum: ["NEW_LEAD", "RFQ_RECEIVED", "RFQ_NOT_RELEVANT", "PROPOSAL_SHARED", "FOLLOW_UP"] },
+    stage: { type: "string", enum: ["NEW_LEAD", "RFQ_RECEIVED", "RFQ_NOT_RELEVANT", "PROPOSAL_SHARED", "FOLLOW_UP", "SITE_VISIT", "NEGOTIATION", "DEAL_LOST", "AGREEMENT_WORK", "MONEY_COLLECTION", "DEAL_CLOSED"] },
     leadSource: { type: "string", enum: ["GODAMWALE", "BROKER", "DIRECT"] },
     duration: { type: "string", enum: ["LONG_TERM", "SHORT_TERM"] },
-    city: { type: "string", description: "City mentioned in the RFQ" },
+    city: { type: "string", description: "City mentioned in the RFQ. Use empty string if not mentioned." },
     repeatCustomer: { type: "boolean" },
     companyName: { type: "string", description: "Company or business name of the client. Use empty string if not mentioned." },
     pocName: {
@@ -41,9 +40,9 @@ const opportunitySchema = {
       required: ["primaryPhoneNumber", "primaryPhoneCallingCode", "primaryPhoneCountryCode"],
       additionalProperties: false,
     },
-    description: { type: "string", description: "Compact summary. Format: 'Specs: ...; Duration: ...; Possession: ...'. Include warehouse specs, lock-in period, and possession/start date." },
+    budget: { type: "string", description: "Budget per square foot as a plain number string. E.g. Rs 25/sqft → \"25\". Use empty string if not mentioned." },
   },
-  required: ["name", "amount", "closeDate", "stage", "leadSource", "duration", "city", "repeatCustomer", "companyName", "pocName", "pocPhoneNumber", "description"],
+  required: ["name", "amount", "stage", "leadSource", "duration", "city", "repeatCustomer", "companyName", "pocName", "pocPhoneNumber", "budget"],
   additionalProperties: false,
 };
 
@@ -65,13 +64,12 @@ CRITICAL RULES:
 - NEVER guess, hallucinate, or fill in plausible-sounding data. Missing data is better than wrong data.
 
 FIELD INSTRUCTIONS:
-- name: Format STRICTLY as "Size - Location, City (ClientName)". NEVER prefix with deal type like "Warehouse RFQ", "Cold Storage RFQ", etc. WRONG: "Warehouse RFQ - 5,000 sqft - HSR Layout, Bangalore (Acme Corp)". CORRECT: "5,000 sqft - HSR Layout, Bangalore (Acme Corp)". Size is the area/capacity requested with Indian number formatting (use range if given, e.g. "5,000-10,000 sqft"). Location is the specific locality/area within the city. Use "TBD" for any unknown part. If client name is unknown, omit the parentheses entirely.
-- amount.amountMicros: The budget amount as a plain number string — no multiplication. This can be either a total budget or a rate per square foot, whichever is mentioned. E.g. Rs 2,20,000 → "220000". 5 lakhs → "500000". 1.5 crore → "15000000". Rs 25/sqft → "25". Use "0" if not mentioned.
+- name: Format STRICTLY as "Company - Space - Area, City". E.g. "Acme Corp - 5,000 sqft - HSR Layout, Bangalore". Space is the area/capacity requested with Indian number formatting (use range if given, e.g. "5,000-10,000 sqft"). Area is the specific locality/area within the city. Use "TBD" for any unknown part.
+- amount.amountMicros: The TOTAL deal size as a plain number string — no multiplication. E.g. Rs 2,20,000 → "220000". 5 lakhs → "500000". 1.5 crore → "15000000". ONLY use this if the total deal value is explicitly mentioned. Use "0" if not mentioned. Do NOT derive this from per-sqft rates.
 - amount.currencyCode: Almost always "INR" unless USD/EUR is explicitly stated.
-- closeDate: Possession or move-in date in ISO 8601 (e.g. "2026-06-01T00:00:00.000Z"). Use "" if not mentioned. Interpret "immediate" as today's date (${today}T00:00:00.000Z).
-- stage: Always "RFQ_RECEIVED" for incoming RFQs.
+- stage: Default to "RFQ_RECEIVED". If the text mentions a stage keyword — even misspelled or informal (e.g. "negotation", "negotiating", "site visit done", "deal lost", "proposal sent", "agreement work", "closed") — map it to the closest matching enum value. Do NOT infer a stage from context; only match when the user explicitly states one.
 - leadSource: "GODAMWALE" if Godamwale/platform is mentioned, "BROKER" if a broker/agent/referral is mentioned, "DIRECT" if the client reached out directly or source is unclear.
-- duration: "LONG_TERM" if lock-in/duration is 1 year or above. "SHORT_TERM" for anything under 1 year, spot, one-time, or if impossible to determine.
+- duration: "LONG_TERM" if lock-in/duration is 1 year or above, or if duration is not mentioned. "SHORT_TERM" only if explicitly under 1 year, spot, or one-time.
 - city: Exact city name. Use "" if not mentioned.
 - repeatCustomer: true ONLY if the text explicitly says existing client, repeat customer, or similar. Default false.
 - companyName: The company or business name of the client/requester. Use "" if not mentioned.
@@ -80,7 +78,7 @@ FIELD INSTRUCTIONS:
 - pocPhoneNumber.primaryPhoneNumber: Phone number digits (without country code). Use "" if not mentioned.
 - pocPhoneNumber.primaryPhoneCallingCode: Default "+91" (Indian numbers) unless a different country code is explicitly mentioned.
 - pocPhoneNumber.primaryPhoneCountryCode: Default "IN" (India) unless a different country is explicitly mentioned.
-- description: Compact structured summary of ONLY the details present. Format: "Specs: <type/size/compliance>; Budget: <rate or total>; Duration: <lock-in>; Possession: <date>; Notes: <other requirements>". Omit sections that have no data. Include details like compliant/non-compliant, BTS/RTS, pallet positions, area in sqft, temperature controlled, budget/rate per sqft, frontage, floor preference, and any other specific requirements mentioned.`,
+- budget: Budget per square foot as a plain number string. E.g. Rs 25/sqft → "25". Use "" if not mentioned. Do NOT derive this from total deal size.`,
       },
       { role: "user", content: rfqText },
     ],
@@ -101,14 +99,13 @@ FIELD INSTRUCTIONS:
     throw new Error("Failed to parse AI response as JSON");
   }
 
-  // Keep assignedTo blank for now
-  parsed.assignedTo = "";
+  // Always use the raw RFQ text as the description
+  parsed.description = rfqText;
 
   // Strip fields the AI couldn't determine (empty sentinels)
-  if (!parsed.closeDate) delete parsed.closeDate;
   if (!parsed.city) delete parsed.city;
-  if (!parsed.description) delete parsed.description;
   if (!parsed.companyName) delete parsed.companyName;
+  if (!parsed.budget) delete parsed.budget;
   if (parsed.amount?.amountMicros === "0") delete parsed.amount;
 
   // Strip empty poc fields

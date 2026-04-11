@@ -1,127 +1,81 @@
-# CRM Automations - AI RFQ Service
+# CRM Automations
 
-Backend service that parses natural-language RFQ (Request for Quotation) messages using AI and creates structured opportunities in the Twenty CRM.
-
-## Setup
-
-```bash
-npm install
-cp .env.example .env   # fill in your keys
-npm run dev             # starts with --watch
-```
-
-### Environment Variables
-
-| Variable | Required | Description |
-|---|---|---|
-| `OPENAI_API_KEY` | Yes | OpenAI API key |
-| `TWENTY_CRM_BASE_URL` | Yes | Twenty CRM base URL (e.g. `https://crm.wareongo.com`) |
-| `TWENTY_CRM_API_KEY` | Yes | Twenty CRM bearer token |
-| `RFQ_MODEL` | No | OpenAI model override (default: `gpt-4o`) |
-| `PORT` | No | Server port (default: `3000`) |
-| `DATABASE_URL` | No | PostgreSQL connection string (for Prisma, not yet active) |
-
-## API
-
-Base URL: `http://localhost:3000`
-
----
-
-### `GET /health`
-
-Health check.
-
-**Response** `200`
-
-```json
-{
-  "status": "ok",
-  "timestamp": "2026-04-10T16:00:00.000Z"
-}
-```
-
----
-
-### `POST /rfq`
-
-Parses an RFQ message with AI and creates an opportunity in Twenty CRM.
-
-**Request**
-
-```json
-{
-  "rfq": "RFQ in Bangalore\n\nLocation: HSR layout\nSize: 5000-10000 sqft\nSpecs: Commercial space ground floor\nBudget: 100/sft\nMore comments: Need in high street with good footfall and atleast 30ft frontage. Okay with G+1\n\nClient name: John Smith Enterprises\nPerson: John Smith\nNumber: 9876543210"
-}
-```
-
-**Response** `201`
-
-```json
-{
-  "parsed": {
-    "name": "Bangalore - TBD",
-    "stage": "RFQ_RECEIVED",
-    "leadSource": "DIRECT",
-    "duration": "SHORT_TERM",
-    "city": "Bangalore",
-    "repeatCustomer": false,
-    "companyName": "John Smith Enterprises",
-    "pocName": {
-      "firstName": "John",
-      "lastName": "Smith"
-    },
-    "pocPhoneNumber": {
-      "primaryPhoneNumber": "9876543210",
-      "primaryPhoneCallingCode": "+91",
-      "primaryPhoneCountryCode": "IN"
-    },
-    "description": "Specs: 5000-10000 sqft commercial space ground floor, high street, 30ft frontage, G+1; Budget: 100/sft",
-    "assignedTo": ""
-  },
-  "crm": { "..." }
-}
-```
-
-**Error** `400`
-
-```json
-{ "error": "Missing 'rfq' field in request body" }
-```
-
-**Error** `500`
-
-```json
-{ "error": "Internal server error" }
-```
-
----
-
-## Parsed Fields
-
-The AI extracts the following from the RFQ text. Fields with empty sentinels are stripped before sending to the CRM.
-
-| Field | Type | Notes |
-|---|---|---|
-| `name` | string | `"City - Amount"` or `"City - TBD"` |
-| `amount` | object | `{ amountMicros, currencyCode }`. Dropped if amount is `"0"`. Converted to micros (x1,000,000) before CRM call. |
-| `closeDate` | string | ISO 8601 date. Dropped if empty. |
-| `stage` | enum | Always `RFQ_RECEIVED` for incoming RFQs |
-| `leadSource` | enum | `GODAMWALE`, `BROKER`, `DIRECT` |
-| `duration` | enum | `LONG_TERM`, `SHORT_TERM` |
-| `city` | string | Dropped if empty |
-| `repeatCustomer` | boolean | Default `false` |
-| `companyName` | string | Dropped if empty |
-| `pocName` | object | `{ firstName, lastName }`. Dropped if both empty. |
-| `pocPhoneNumber` | object | `{ primaryPhoneNumber, primaryPhoneCallingCode, primaryPhoneCountryCode }`. Defaults to `+91`/`IN`. Dropped if no number. |
-| `description` | string | `"Specs: ...; Budget: ...; Duration: ...; Possession: ...; Notes: ..."` |
-| `assignedTo` | string | Always blank (stripped before CRM call) |
+Backend service for WareOnGo that parses natural-language RFQ (Request for Quotation) messages into structured CRM opportunities using AI, and pushes them into Twenty CRM.
 
 ## Architecture
 
 ```
-POST /rfq
-  -> rfq.controller.js
-    -> rfq.service.js      (OpenAI GPT-4o structured output)
-    -> twenty.service.js    (POST to Twenty CRM REST API)
-  <- { parsed, crm }
+frontend/          Static HTML/JS frontend for submitting RFQs
+src/
+  server.js        Entry point
+  app.js           Express config (CORS, JSON, routes)
+  routes/          Route definitions
+  controllers/     Request handlers
+  services/
+    rfq.service.js    AI-powered RFQ parsing (OpenAI)
+    twenty.service.js CRM API integration (Twenty)
 ```
+
+## Setup
+
+### Prerequisites
+
+- Node.js v22+
+- OpenAI API key
+- Twenty CRM instance with API key
+
+### Install
+
+```bash
+npm install
+```
+
+### Environment Variables
+
+Create a `.env` file in the project root:
+
+```env
+PORT=3000
+OPENAI_API_KEY=sk-...
+TWENTY_CRM_BASE_URL=https://crm.wareongo.com
+TWENTY_CRM_API_KEY=eyJ...
+RFQ_MODEL=gpt-4o          # optional, defaults to gpt-4o
+DATABASE_URL=postgresql://... # optional, for future Prisma use
+```
+
+### Run
+
+```bash
+# Development (with file watching)
+npm run dev
+
+# Production
+npm start
+```
+
+## Deployment (Render)
+
+| Setting | Value |
+|---|---|
+| Environment | Node |
+| Root Directory | `/` |
+| Build Command | `npm install` |
+| Start Command | `npm start` |
+
+Set the environment variables (`OPENAI_API_KEY`, `TWENTY_CRM_BASE_URL`, `TWENTY_CRM_API_KEY`) in the Render dashboard.
+
+**Live URL:** https://twenty-automations.onrender.com
+
+## Frontend
+
+The `frontend/` folder contains a static HTML/JS/CSS app for submitting RFQs. Open `frontend/index.html` in a browser. Toggle the `API_URL` in `frontend/app.js` between `localhost` and the Render URL.
+
+## Parsing Rules
+
+- **Name format:** `Company - Space - Area, City`
+- **Amount:** Only populated when total deal size is explicitly mentioned
+- **Budget:** Per square foot rate
+- **Duration:** Defaults to `LONG_TERM`; `SHORT_TERM` only if explicitly under 1 year
+- **Stage:** Defaults to `RFQ_RECEIVED`; recognizes other stages when explicitly stated (handles misspellings)
+- **Description:** Always set to the raw RFQ text verbatim
+- **Lead Source:** `GODAMWALE`, `BROKER`, or `DIRECT`

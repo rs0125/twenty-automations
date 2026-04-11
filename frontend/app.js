@@ -1,4 +1,5 @@
 const API_URL = "http://localhost:3000";
+// const API_URL = "https://twenty-automations.onrender.com";
 
 const rfqInput = document.getElementById("rfqInput");
 const submitBtn = document.getElementById("submitBtn");
@@ -64,11 +65,11 @@ function renderResult(data) {
     ["Duration", p.duration],
     ["City", p.city || "-"],
     ["Amount", p.amount ? `${p.amount.amountMicros} ${p.amount.currencyCode}` : "-"],
+    ["Budget/sqft", p.budget || "-"],
     ["Company", p.companyName || "-"],
     ["POC", p.pocName ? `${p.pocName.firstName} ${p.pocName.lastName}`.trim() : "-"],
     ["Phone", p.pocPhoneNumber ? `${p.pocPhoneNumber.primaryPhoneCallingCode} ${p.pocPhoneNumber.primaryPhoneNumber}` : "-"],
     ["Repeat Customer", p.repeatCustomer ? "Yes" : "No"],
-    ["Close Date", p.closeDate || "-"],
     ["Description", p.description || "-"],
     ["CRM ID", data.crm?.data?.createOpportunity?.id || "-"],
   ];
