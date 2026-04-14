@@ -7,4 +7,21 @@ datasource db {
   provider = "postgresql"
 }
 
-// Define your models below
+model Opportunity {
+  opportunityId    String   @id @map("opportunity_id")
+  data             Json
+  stage            String?
+  assigneeEmail    String?  @map("assignee_email")
+  lastActivityAt   DateTime @default(now()) @map("last_activity_at")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  reminder1hSent   Boolean  @default(false) @map("reminder_1h_sent")
+  reminder1dSent   Boolean  @default(false) @map("reminder_1d_sent")
+  reminder3dSent   Boolean  @default(false) @map("reminder_3d_sent")
+
+  reminder1hFailed String?  @map("reminder_1h_failed")
+  reminder1dFailed String?  @map("reminder_1d_failed")
+  reminder3dFailed String?  @map("reminder_3d_failed")
+
+  @@map("opportunities")
+}
