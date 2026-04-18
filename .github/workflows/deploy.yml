@@ -1,0 +1,78 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-ec2
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout (for reference / future build steps)
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+        run: |
+          ssh -i ~/.ssh/deploy_key "$EC2_USER@$EC2_HOST" bash <<'REMOTE'
+            set -euo pipefail
+
+            # Load nvm so node/npm/pm2 are on PATH
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+
+            cd ~/app
+
+            echo "==> Fetch + reset to origin/main"
+            git fetch --all --prune
+            git reset --hard origin/main
+            git log -1 --oneline
+
+            echo "==> Install prod deps"
+            npm ci --omit=dev
+
+            echo "==> Prisma generate"
+            npx prisma generate
+
+            echo "==> Reload pm2"
+            if pm2 describe crm-automations >/dev/null 2>&1; then
+              pm2 reload crm-automations --update-env
+            else
+              pm2 start ecosystem.config.cjs
+            fi
+            pm2 save
+          REMOTE
+
+      - name: Health check
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          # Give the app a moment to come up after reload
+          sleep 3
+          for i in 1 2 3 4 5; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "http://$EC2_HOST/health" || echo "000")
+            echo "attempt $i -> HTTP $code"
+            if [ "$code" = "200" ]; then
+              echo "Deploy healthy"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "Health check failed after 5 attempts"
+          exit 1
