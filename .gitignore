@@ -3,3 +3,7 @@ node_modules
 .env
 
 /generated/prisma
+
+# Local-only secrets (never commit)
+crm-ec2-key.txt
+*.pem

@@ -18,12 +18,61 @@ jobs:
       - name: Checkout (for reference / future build steps)
         uses: actions/checkout@v4
 
-      - name: Setup SSH
+      - name: Setup SSH (debug)
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
         run: |
+          set +e
+          echo "=====Secret presence checks"
+          echo "EC2_HOST set: $([ -n "$EC2_HOST" ] && echo yes || echo NO)"
+          echo "EC2_HOST length: ${#EC2_HOST}"
+          echo "EC2_USER set: $([ -n "$EC2_USER" ] && echo yes || echo NO)"
+          echo "EC2_USER length: ${#EC2_USER}"
+          echo "EC2_SSH_KEY set: $([ -n "$EC2_SSH_KEY" ] && echo yes || echo NO)"
+          echo "EC2_SSH_KEY length: ${#EC2_SSH_KEY}"
+          echo "====="
+
+          echo "=====Write key file"
           mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
+          echo "Key file line count: $(wc -l < ~/.ssh/deploy_key)"
+          echo "Key file first line: $(head -1 ~/.ssh/deploy_key)"
+          echo "Key file last line: $(tail -1 ~/.ssh/deploy_key)"
+          echo "Key file perms: $(stat -c '%a' ~/.ssh/deploy_key)"
+          echo "====="
+
+          echo "=====Validate key format"
+          ssh-keygen -y -f ~/.ssh/deploy_key > /tmp/pub.out 2> /tmp/pub.err
+          rc=$?
+          echo "ssh-keygen -y exit code: $rc"
+          echo "stderr: $(cat /tmp/pub.err)"
+          echo "pubkey (truncated): $(cut -c1-40 /tmp/pub.out)..."
+          echo "====="
+
+          echo "=====Network reachability to $EC2_HOST"
+          echo "-- DNS / ping --"
+          getent hosts "$EC2_HOST" || echo "(no DNS record, likely an IP)"
+          echo "-- TCP port 22 probe (timeout 10s) --"
+          timeout 10 bash -c "</dev/tcp/$EC2_HOST/22" && echo "port 22 OPEN" || echo "port 22 CLOSED/FILTERED (exit $?)"
+          echo "====="
+
+          echo "=====ssh-keyscan (verbose)"
+          ssh-keyscan -v -T 10 -H "$EC2_HOST" >> ~/.ssh/known_hosts 2> /tmp/keyscan.err
+          rc=$?
+          echo "ssh-keyscan exit code: $rc"
+          echo "--- stderr ---"
+          cat /tmp/keyscan.err
+          echo "--- known_hosts lines added: $(wc -l < ~/.ssh/known_hosts) ---"
+          echo "====="
+
+          # Fail loudly only if keyscan genuinely failed
+          if [ $rc -ne 0 ]; then
+            echo "::error::ssh-keyscan failed for host=$EC2_HOST"
+            exit 1
+          fi
 
       - name: Deploy
         env:
