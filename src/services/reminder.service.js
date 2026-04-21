@@ -44,8 +44,27 @@ function readField(data, key) {
   return s.length ? s : null;
 }
 
+// Format an ISO timestamp as "21 Apr 2026, 01:57 AM IST".
+// Returns the original string if parsing fails, so bad input never breaks the email.
+const DATE_FORMATTER = new Intl.DateTimeFormat("en-IN", {
+  timeZone: "Asia/Kolkata",
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: true,
+});
+
+function formatDate(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return value;
+  return `${DATE_FORMATTER.format(d)} IST`;
+}
+
 // Build ordered list of { label, value } rows, skipping anything missing.
-function collectFields(data, opportunityId) {
+function collectFields(data) {
   const pairs = [
     ["Deal",             readField(data, "deal_name")],
     ["Company",          readField(data, "company")],
@@ -54,9 +73,8 @@ function collectFields(data, opportunityId) {
     ["Assigned To",      readField(data, "assigned_to")],
     ["Stage",            readField(data, "stage")],
     ["Description",      readField(data, "description")],
-    ["Created At",       readField(data, "created_at")],
-    ["Last Updated",     readField(data, "last_updated")],
-    ["Opportunity ID",   opportunityId],
+    ["Created At",       formatDate(readField(data, "created_at"))],
+    ["Last Updated",     formatDate(readField(data, "last_updated"))],
   ];
   return pairs.filter(([, v]) => v !== null);
 }
@@ -137,7 +155,7 @@ export async function processReminder({ opportunityId, assigneeEmail, step }) {
     return { sent: false, skipped: true };
   }
 
-  const fields = collectFields(opportunity.data, opportunityId);
+  const fields = collectFields(opportunity.data);
   const html = buildHtmlBody({ fields, timePeriod: config.timePeriod });
   const text = buildTextBody({ fields, timePeriod: config.timePeriod });
   const dealName = opportunity.data?.deal_name || opportunityId;
