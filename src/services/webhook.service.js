@@ -2,7 +2,15 @@ import prisma from "../lib/prisma.js";
 
 function deriveEmail(assignedTo) {
   if (!assignedTo) return null;
-  return assignedTo.replace(/\s+/g, "").toLowerCase() + "@wareongo.com";
+  // Twenty sends multiple assignees as a comma-joined string (e.g. "DHAVAL,RAGHAV").
+  // Expand each name to <name>@wareongo.com and rejoin. Stored as a comma-separated
+  // list; email.service.js splits it back into an array at send time.
+  const emails = String(assignedTo)
+    .split(",")
+    .map((name) => name.replace(/\s+/g, "").toLowerCase())
+    .filter(Boolean)
+    .map((name) => `${name}@wareongo.com`);
+  return emails.length ? emails.join(",") : null;
 }
 
 export async function upsertOpportunity(body) {

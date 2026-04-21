@@ -3,9 +3,24 @@ import { Resend } from "resend";
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function sendMail({ to, text, timePeriod }) {
+  // `to` may be a single email, a comma-separated string ("a@x.com,b@x.com"),
+  // or an array. Normalize to an array for Resend.
+  const recipients = Array.isArray(to)
+    ? to
+    : String(to)
+        .split(",")
+        .map((e) => e.trim())
+        .filter(Boolean);
+
+  if (recipients.length === 0) {
+    const err = new Error("No recipients");
+    err.status = 422;
+    throw err;
+  }
+
   const { data, error } = await resend.emails.send({
     from: process.env.RESEND_FROM || "onboarding@resend.dev",
-    to,
+    to: recipients,
     subject: `[${timePeriod}] RFQ Reminder`,
     text,
   });
