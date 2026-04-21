@@ -7,3 +7,6 @@ node_modules
 # Local-only secrets (never commit)
 crm-ec2-key.txt
 *.pem
+
+# SQL files kept local (contain operational secrets / DB-only logic)
+sql/

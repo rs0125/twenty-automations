@@ -36,29 +36,17 @@ export async function processReminder({ opportunityId, assigneeEmail, step }) {
     throw err;
   }
 
-  // Already sent or failed — skip
-  if (opportunity[config.sentCol] || opportunity[config.failedCol] != null) {
+  // Idempotency guard: if the reconciler has already marked this step sent,
+  // don't re-send even if the cron somehow re-queued this row.
+  if (opportunity[config.sentCol]) {
     return { sent: false, skipped: true };
   }
 
   const text = `Reminder: The opportunity "${opportunity.data?.deal_name || opportunityId}" has been in RFQ Received for over ${config.timePeriod} without activity. Please follow up.`;
 
-  try {
-    await sendWithRetry({ to: assigneeEmail, text, timePeriod: config.timePeriod });
-
-    await prisma.opportunity.update({
-      where: { opportunityId },
-      data: { [config.sentCol]: true },
-    });
-
-    return { sent: true };
-  } catch (err) {
-    await prisma.opportunity.update({
-      where: { opportunityId },
-      data: { [config.failedCol]: err.message || "Unknown error" },
-    });
-
-    console.error(`[reminder] Failed to send ${step} reminder for ${opportunityId}:`, err.message);
-    return { sent: false, failed: true, error: err.message };
-  }
+  // Send and let the caller's HTTP status drive the reconciler.
+  // Success -> 200 -> reconciler flips reminder_X_sent = true.
+  // Failure -> 5xx -> reconciler records HTTP error and bumps attempts.
+  await sendWithRetry({ to: assigneeEmail, text, timePeriod: config.timePeriod });
+  return { sent: true };
 }
