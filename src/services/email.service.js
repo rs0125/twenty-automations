@@ -18,9 +18,13 @@ export async function sendMail({ to, text, timePeriod }) {
     throw err;
   }
 
+  // First assignee on To:, rest on Cc:.
+  const [primary, ...cc] = recipients;
+
   const { data, error } = await resend.emails.send({
     from: process.env.RESEND_FROM || "onboarding@resend.dev",
-    to: recipients,
+    to: primary,
+    ...(cc.length ? { cc } : {}),
     subject: `[${timePeriod}] RFQ Reminder`,
     text,
   });
