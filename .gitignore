@@ -10,3 +10,6 @@ crm-ec2-key.txt
 
 # SQL files kept local (contain operational secrets / DB-only logic)
 sql/
+
+# Local-only working notes
+TODO.md
