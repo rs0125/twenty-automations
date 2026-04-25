@@ -1,49 +1,40 @@
-# API Documentation
+# API Reference
 
-**Base URL:** `https://twenty-automations.onrender.com`
+**Public base URL:** `http://ec2-13-206-110-74.ap-south-1.compute.amazonaws.com` (subject to change on instance restart — see DEPLOYMENT.md)
+
+All endpoints accept JSON unless noted otherwise.
 
 ---
 
-## Health Check
+## `GET /health`
 
-### `GET /health`
-
-Returns service status.
+Liveness probe.
 
 **Response** `200 OK`
 
 ```json
-{
-  "status": "ok",
-  "timestamp": "2026-04-11T10:30:00.000Z"
-}
+{ "status": "ok", "timestamp": "2026-04-26T10:30:00.000Z" }
 ```
 
 ---
 
-## Parse RFQ
+## `POST /rfq`
 
-### `POST /rfq`
+Parses a natural-language RFQ message into a structured opportunity and creates it in Twenty CRM. The opportunity is attributed to the WhatsApp sender (when known) and inferred assignees are set when the message explicitly asks for them.
 
-Parses a natural-language RFQ message into a structured opportunity and creates it in Twenty CRM.
-
-**Request Headers**
-
-| Header | Value |
-|---|---|
-| Content-Type | `application/json` |
-
-**Request Body**
+**Request body**
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `rfq` | string | Yes | The raw RFQ message text |
+| `senderNumber` | string | No | E.164 phone of the WhatsApp sender (e.g. `+918076708542`). When matched against `VerifiedNumber`, the created opportunity's `createdBy` is set to that workspace member. Falls back to the API key creator when unmatched. |
 
-**Example Request**
+**Example request**
 
 ```json
 {
-  "rfq": "RFQ in Bangalore\n\nLocation: HSR layout\nSize: 5000-10000 sqft\nBudget: 100/sft\nClient name: Ramesh Enterprises\nPerson: Ramesh\nNumber: 89884347392"
+  "rfq": "Need 5000 sqft warehouse in Bangalore. assign to jayanth",
+  "senderNumber": "+918076708542"
 }
 ```
 
@@ -52,258 +43,180 @@ Parses a natural-language RFQ message into a structured opportunity and creates 
 ```json
 {
   "parsed": {
-    "name": "Ramesh Enterprises - 5,000-10,000 sqft - HSR Layout, Bangalore",
+    "name": "TBD - 5,000 sqft - TBD, Bangalore",
     "stage": "RFQ_RECEIVED",
     "leadSource": "DIRECT",
     "duration": "LONG_TERM",
     "city": "Bangalore",
     "repeatCustomer": false,
-    "companyName": "Ramesh Enterprises",
-    "pocName": {
-      "firstName": "Ramesh",
-      "lastName": ""
-    },
-    "pocPhoneNumber": {
-      "primaryPhoneNumber": "89884347392",
-      "primaryPhoneCallingCode": "+91",
-      "primaryPhoneCountryCode": "IN"
-    },
-    "budget": "100",
-    "description": "RFQ in Bangalore\n\nLocation: HSR layout\nSize: 5000-10000 sqft\nBudget: 100/sft\nClient name: Ramesh Enterprises\nPerson: Ramesh\nNumber: 89884347392"
+    "description": "Need 5000 sqft warehouse in Bangalore. assign to jayanth",
+    "assignedTo": ["JAYANTH"],
+    "createdBy": {
+      "source": "MANUAL",
+      "workspaceMemberId": "f22c1ae4-2b4b-4408-bd9e-e7d4674cf011",
+      "name": "Raghav"
+    }
   },
   "crm": {
     "data": {
-      "createOpportunity": {
-        "id": "cc53ed26-3928-48f4-82ea-af406a122d07"
-      }
+      "createOpportunity": { "id": "cc53ed26-3928-48f4-82ea-af406a122d07" }
     }
   }
 }
 ```
 
----
-
-## Parsed Fields Reference
-
-### Top-level fields
+### Parsed fields
 
 | Field | Type | Description |
 |---|---|---|
-| `name` | string | Format: `Company - Space - Area, City`. Uses `TBD` for unknown parts. |
-| `stage` | string enum | Deal stage. Defaults to `RFQ_RECEIVED`. |
-| `leadSource` | string enum | `GODAMWALE`, `BROKER`, or `DIRECT`. |
-| `duration` | string enum | `LONG_TERM` (default) or `SHORT_TERM` (only if explicitly < 1 year). |
-| `city` | string | City name. Omitted if not mentioned. |
-| `repeatCustomer` | boolean | `true` only if explicitly stated. Defaults to `false`. |
-| `companyName` | string | Client company name. Omitted if not mentioned. |
-| `budget` | string | Budget per sqft as a number string. Omitted if not mentioned. |
+| `name` | string | `Company - Space - Area, City`. `TBD` for unknown parts. |
+| `stage` | enum | Defaults to `RFQ_RECEIVED`. Other values inferred only if explicitly stated. |
+| `leadSource` | enum | `GODAMWALE`, `BROKER`, or `DIRECT`. |
+| `duration` | enum | `LONG_TERM` (default) or `SHORT_TERM` (only if explicitly < 1 year). |
+| `city` | string | Omitted if not mentioned. |
+| `repeatCustomer` | boolean | `true` only if explicitly stated. |
+| `companyName` | string | Omitted if not mentioned. |
+| `budget` | string | Per-sqft rate as a number string. Omitted if not mentioned. |
 | `description` | string | Raw RFQ text verbatim. |
+| `amount` | object | `{ amountMicros, currencyCode }`. Omitted unless total deal size is explicitly mentioned. |
+| `pocName` | object | `{ firstName, lastName }`. Omitted if not mentioned. |
+| `pocPhoneNumber` | object | `{ primaryPhoneNumber, primaryPhoneCallingCode, primaryPhoneCountryCode }`. Omitted if not mentioned. |
+| `assignedTo` | string[] | Inferred only when the message explicitly asks ("assign to X", "X please handle"). Each value is a Twenty enum (uppercased first name). Validated against `ASSIGNABLE_USERS`; unknown names are dropped. Field omitted entirely if no explicit assignment intent. |
+| `createdBy` | object | Set only when `senderNumber` resolved against `VerifiedNumber`. Otherwise Twenty defaults to the API key. |
 
-### `amount` (omitted if total deal size not mentioned)
+### Stage enum
 
-| Field | Type | Description |
-|---|---|---|
-| `amountMicros` | string | Total deal size as a plain number string (converted to micros before CRM push). |
-| `currencyCode` | string | `INR`, `USD`, or `EUR`. |
+`NEW_LEAD`, `RFQ_RECEIVED` *(default)*, `RFQ_NOT_RELEVANT`, `PROPOSAL_SHARED`, `FOLLOW_UP`, `SITE_VISIT`, `NEGOTIATION`, `DEAL_LOST`, `AGREEMENT_WORK`, `MONEY_COLLECTION`, `DEAL_CLOSED`.
 
-### `pocName` (omitted if no name mentioned)
+### `assignedTo` enum
 
-| Field | Type | Description |
-|---|---|---|
-| `firstName` | string | First name of point of contact. |
-| `lastName` | string | Last name. Empty string if only one name given. |
-
-### `pocPhoneNumber` (omitted if no phone mentioned)
-
-| Field | Type | Description |
-|---|---|---|
-| `primaryPhoneNumber` | string | Phone number without country code. |
-| `primaryPhoneCallingCode` | string | Calling code (default `+91`). |
-| `primaryPhoneCountryCode` | string | ISO country code (default `IN`). |
-
-### Stage Enum Values
-
-| Value | Description |
-|---|---|
-| `NEW_LEAD` | New lead |
-| `RFQ_RECEIVED` | RFQ received (default) |
-| `RFQ_NOT_RELEVANT` | RFQ not relevant |
-| `PROPOSAL_SHARED` | Proposal shared |
-| `FOLLOW_UP` | Follow up |
-| `SITE_VISIT` | Site visit |
-| `NEGOTIATION` | Negotiation |
-| `DEAL_LOST` | Deal lost |
-| `AGREEMENT_WORK` | Agreement work |
-| `MONEY_COLLECTION` | Money collection |
-| `DEAL_CLOSED` | Deal closed |
-
-### Assigned To Enum Values (CRM field, not set by parser)
-
-`DHAVAL`, `JAYANTH`, `NIKESH`, `RANITA`, `MANEESH`, `ARNAV`, `MANOHARI`, `NIHAS`, `RAGHAV`
+Sourced from the `ASSIGNABLE_USERS` env var. Currently: `DHAVAL`, `JAYANTH`, `NIKESH`, `RANITA`, `MANEESH`, `ARNAV`, `MANOHARI`, `NIHAS`, `RAGHAV`.
 
 ---
 
-## Send Email
+## `POST /webhook/twenty`
 
-### `POST /email`
+Receives opportunity create/update events from Twenty CRM. Upserts the row into the local `opportunities` table, resets reminder timers on activity, then asynchronously resolves the deal creator from Twenty REST and prepends their email to `assignee_email`.
 
-Sends an email via Resend with a configurable time period in the subject.
+**Request headers**
 
-**Request Headers**
+Twenty currently posts JSON bodies with `Content-Type: application/x-www-form-urlencoded` (an upstream quirk). The handler recovers the JSON regardless. Plain `application/json` also works.
 
-| Header | Value |
-|---|---|
-| Content-Type | `application/json` |
-
-**Request Body**
+**Request body**
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `to` | string | Yes | Recipient email address |
-| `text` | string | Yes | Email body text |
-| `timePeriod` | string | Yes | One of: `1 hour`, `1 day`, `3 days` |
+| `id` | string | Yes | Twenty opportunity UUID |
+| `stage` | string | No | e.g. `RFQ_RECEIVED` |
+| `assigned_to` | string | No | Comma-separated names (e.g. `"DHAVAL,RAGHAV"`); each becomes `<name>@wareongo.com` |
+| `deal_name` | string | No | |
+| `company` | string | No | |
+| `description` | string | No | |
+| `POC Name` | string | No | |
+| `POC Phone Number` | string | No | |
+| `created_at` | string | No | |
+| `last_updated` | string | No | |
 
-**Example Request**
-
-```json
-{
-  "to": "dhaval@wareongo.com",
-  "text": "Please follow up on the pending RFQ.",
-  "timePeriod": "1 day"
-}
-```
-
-**Response** `200 OK`
+**Response** `200 OK` (returned immediately; upsert + creator resolution happen async)
 
 ```json
-{
-  "message": "Email sent",
-  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-}
+{ "received": true }
 ```
 
-Subject line format: `[1 day] RFQ Reminder`
+### Recipient ordering
+
+After the upsert, the handler GETs `/rest/opportunities/{id}` from Twenty, reads `createdBy.workspaceMemberId`, and looks the user up via `VerifiedNumber.twenty_user_id`. If found, the creator's email is **prepended** to `assignee_email` (deduped, case-insensitive). At reminder send time `email.service.js` uses the first entry as `To:` and the rest as `Cc:` — so the creator becomes the primary recipient.
+
+If creator resolution fails for any reason, the upsert is unaffected and the existing assignees still get the reminder.
 
 ---
 
-## Twenty CRM Webhook
+## `POST /send-reminder`
 
-### `POST /webhook/twenty`
+Called by Supabase `pg_cron`. Sends one follow-up email per call, with retry/backoff on Resend errors. The Postgres cron job flips `reminder_<step>_sent` to `true` based on the response.
 
-Receives opportunity create/update events from Twenty CRM. Upserts the record into the local database and resets reminder timers.
-
-**Request Headers**
+**Request headers**
 
 | Header | Value |
 |---|---|
-| Content-Type | `application/x-www-form-urlencoded` |
+| `Content-Type` | `application/json` |
+| `X-Auth` | Shared secret. Validated against `REMINDER_SECRET` in the service env. Requests without it return `401`; the service refuses all requests with `503` if the secret isn't configured. |
 
-**Request Body**
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `id` | string | Yes | Twenty CRM opportunity ID |
-| `stage` | string | No | Current deal stage (e.g. `RFQ_RECEIVED`) |
-| `assigned_to` | string | No | Assignee name (email derived as `name@wareongo.com`) |
-| `deal_name` | string | No | Opportunity name |
-| `company` | string | No | Company name |
-| `description` | string | No | Opportunity description |
-| `POC Name` | string | No | Point of contact name |
-| `POC Phone Number` | string | No | Point of contact phone |
-| `created_at` | string | No | Creation date |
-| `last_updated` | string | No | Last update date |
-
-**Response** `200 OK` (returned immediately, processing happens async)
-
-```json
-{
-  "received": true
-}
-```
-
----
-
-## Send Reminder
-
-### `POST /send-reminder`
-
-Called by pg_cron to send a follow-up reminder email. Retries up to 3 times with exponential backoff. Marks the reminder as sent or failed in the database.
-
-**Request Headers**
-
-| Header | Value |
-|---|---|
-| Content-Type | `application/json` |
-
-**Request Body**
+**Request body**
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `opportunityId` | string | Yes | The opportunity ID to remind about |
-| `assigneeEmail` | string | Yes | Email address to send the reminder to |
-| `step` | string | Yes | Reminder step: `1h`, `1d`, or `3d` |
+| `opportunityId` | string | Yes | The opportunity to remind about |
+| `assigneeEmail` | string | Yes | Recipient string. May be a single email or comma-separated; the first entry becomes `To:`, the rest `Cc:`. Already includes the creator (prepended at webhook time). |
+| `step` | string enum | Yes | `1h`, `1d`, or `3d` |
 
-**Example Request**
+**Example request**
 
 ```json
 {
   "opportunityId": "cc53ed26-3928-48f4-82ea-af406a122d07",
-  "assigneeEmail": "dhaval@wareongo.com",
+  "assigneeEmail": "raghav@wareongo.com,dhaval@wareongo.com",
   "step": "1h"
 }
 ```
 
-**Response** `200 OK`
+**Responses**
 
 ```json
-{
-  "sent": true
-}
+{ "sent": true }
+```
+```json
+{ "sent": false, "skipped": true }
 ```
 
-**Response (skipped - already sent or failed)**
+On failure (Resend error after retries, opportunity not found, etc.) the endpoint returns a `4xx` or `5xx` with an `error` body — the cron reconciler infers failure from the HTTP status code, not from a payload field. Example:
 
 ```json
-{
-  "sent": false,
-  "skipped": true
-}
-```
-
-**Response (all retries exhausted)**
-
-```json
-{
-  "sent": false,
-  "failed": true,
-  "error": "Resend API error: rate_limit_exceeded"
-}
+{ "error": "Internal server error" }
 ```
 
 ---
 
-## Error Responses
+## `POST /email`
 
-### `400 Bad Request`
+Ad-hoc reminder-style email send. Same recipient semantics as `/send-reminder` (comma list → first is `To:`, rest are `Cc:`).
+
+**Request body**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `to` | string | Yes | Recipient email or comma-separated list. |
+| `text` | string | Yes | Plain-text body. |
+| `timePeriod` | string | Yes | One of `"1 hour"`, `"1 day"`, `"3 days"` — used to build the subject (`[<period>] RFQ Reminder`). |
+
+**Response** `200 OK`
 
 ```json
-{
-  "error": "Missing 'rfq' field in request body"
-}
+{ "message": "Email sent", "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }
 ```
 
-### `500 Internal Server Error`
+> The underlying `sendMail` service supports richer fields (`subject`, `html`), but they are not accepted at the HTTP layer — `/send-reminder` is the path that uses them.
+
+---
+
+## Error responses
+
+`400` — missing / malformed required field.
 
 ```json
-{
-  "error": "Internal server error"
-}
+{ "error": "Missing 'rfq' field in request body" }
 ```
 
-### CRM API Error (4xx)
+`401` — `/send-reminder` without a valid `X-Auth`.
+
+`5xx` — internal error (logged on the server).
 
 ```json
-{
-  "error": "Twenty CRM API error: 400"
-}
+{ "error": "Internal server error" }
+```
+
+CRM upstream error (the controller forwards Twenty's status as a `4xx`):
+
+```json
+{ "error": "Twenty CRM API error: 400" }
 ```
