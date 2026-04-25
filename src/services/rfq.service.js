@@ -2,6 +2,16 @@ import OpenAI from "openai";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+// Twenty's `assignedTo` is a multi-select enum. The accepted values are the
+// uppercased first names of the workspace members. Sourced from
+// ASSIGNABLE_USERS env var (comma-separated). Update the env when a teammate
+// is added/removed in Twenty and restart.
+const ASSIGNABLE_USERS = String(process.env.ASSIGNABLE_USERS || "")
+  .split(",")
+  .map((u) => u.trim().toUpperCase())
+  .filter(Boolean);
+const ASSIGNABLE_LOOKUP = new Map(ASSIGNABLE_USERS.map((u) => [u.toLowerCase(), u]));
+
 const opportunitySchema = {
   type: "object",
   properties: {
@@ -41,8 +51,13 @@ const opportunitySchema = {
       additionalProperties: false,
     },
     budget: { type: "string", description: "Budget per square foot as a plain number string. E.g. Rs 25/sqft → \"25\". Use empty string if not mentioned." },
+    assignTo: {
+      type: "array",
+      items: { type: "string" },
+      description: "First names of teammates the RFQ explicitly asks to be assigned (e.g. 'assign to jayanth', 'dhaval please handle this'). Empty array if no explicit assignment intent.",
+    },
   },
-  required: ["name", "amount", "stage", "leadSource", "duration", "city", "repeatCustomer", "companyName", "pocName", "pocPhoneNumber", "budget"],
+  required: ["name", "amount", "stage", "leadSource", "duration", "city", "repeatCustomer", "companyName", "pocName", "pocPhoneNumber", "budget", "assignTo"],
   additionalProperties: false,
 };
 
@@ -78,7 +93,8 @@ FIELD INSTRUCTIONS:
 - pocPhoneNumber.primaryPhoneNumber: Phone number digits (without country code). Use "" if not mentioned.
 - pocPhoneNumber.primaryPhoneCallingCode: Default "+91" (Indian numbers) unless a different country code is explicitly mentioned.
 - pocPhoneNumber.primaryPhoneCountryCode: Default "IN" (India) unless a different country is explicitly mentioned.
-- budget: Budget per square foot as a plain number string. E.g. Rs 25/sqft → "25". Use "" if not mentioned. Do NOT derive this from total deal size.`,
+- budget: Budget per square foot as a plain number string. E.g. Rs 25/sqft → "25". Use "" if not mentioned. Do NOT derive this from total deal size.
+- assignTo: List of teammate first names the sender EXPLICITLY asks to assign this RFQ to. Trigger phrases include "assign to <name>", "assigned to <name>", "<name> please handle", "give to <name>", "for <name>". DO NOT include names that appear for any other reason (greetings, signatures, mentions of who the lead is from, who the POC is, etc.). When in doubt, leave it empty. The output is a list of LOWERCASE first names only (e.g. ["jayanth", "dhaval"]). Empty array [] if no explicit assignment intent.`,
       },
       { role: "user", content: rfqText },
     ],
@@ -114,6 +130,24 @@ FIELD INSTRUCTIONS:
   }
   if (!parsed.pocPhoneNumber?.primaryPhoneNumber) {
     delete parsed.pocPhoneNumber;
+  }
+
+  // Validate the LLM-extracted assignTo names against the canonical Twenty
+  // enum. Anything that doesn't map is dropped silently — better to miss an
+  // assignment than to assign the wrong person, per the "be careful" rule.
+  const requested = Array.isArray(parsed.assignTo) ? parsed.assignTo : [];
+  const seen = new Set();
+  const canonical = [];
+  for (const raw of requested) {
+    const key = String(raw || "").trim().toLowerCase();
+    const enumValue = ASSIGNABLE_LOOKUP.get(key);
+    if (!enumValue || seen.has(enumValue)) continue;
+    seen.add(enumValue);
+    canonical.push(enumValue);
+  }
+  delete parsed.assignTo;
+  if (canonical.length) {
+    parsed.assignedTo = canonical;
   }
 
   return parsed;
