@@ -25,3 +25,11 @@ export async function findUserByPhone(input) {
     where: { phone_number: phone },
   });
 }
+
+// Look up a team member by their Twenty workspace member id.
+export async function findUserByTwentyId(id) {
+  if (!id) return null;
+  return prisma.verifiedNumber.findUnique({
+    where: { twenty_user_id: id },
+  });
+}

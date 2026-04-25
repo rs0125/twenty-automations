@@ -1,4 +1,25 @@
 import prisma from "../lib/prisma.js";
+import { getOpportunity } from "./twenty.service.js";
+import { findUserByTwentyId } from "./users.service.js";
+
+// Prepend creator email and dedupe (case-insensitive). The first entry becomes
+// the To: recipient downstream; the rest are CC'd.
+function withCreatorFirst(creatorEmail, assigneeEmail) {
+  const existing = String(assigneeEmail || "")
+    .split(",")
+    .map((e) => e.trim())
+    .filter(Boolean);
+  const seen = new Set();
+  const out = [];
+  for (const e of [creatorEmail, ...existing]) {
+    if (!e) continue;
+    const key = e.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(e);
+  }
+  return out.length ? out.join(",") : null;
+}
 
 function deriveEmail(assignedTo) {
   if (!assignedTo) return null;
@@ -55,4 +76,27 @@ export async function upsertOpportunity(body) {
       assigneeEmail,
     },
   });
+
+  // Resolve the deal creator and prepend them to the recipients string so
+  // they receive every reminder as the primary (To:) recipient. The webhook
+  // payload itself doesn't carry createdBy, so fetch it from Twenty. Failure
+  // here must not break the upsert — log and move on.
+  try {
+    const full = await getOpportunity(id);
+    const creatorMemberId = full?.createdBy?.workspaceMemberId;
+    if (creatorMemberId) {
+      const creator = await findUserByTwentyId(creatorMemberId);
+      if (creator?.email) {
+        const merged = withCreatorFirst(creator.email, assigneeEmail);
+        if (merged !== assigneeEmail) {
+          await prisma.opportunity.update({
+            where: { opportunityId: id },
+            data: { assigneeEmail: merged },
+          });
+        }
+      }
+    }
+  } catch (err) {
+    console.error(`[webhook] creator resolution failed for ${id}:`, err.message);
+  }
 }
