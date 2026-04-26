@@ -29,6 +29,7 @@ model Opportunity {
   reminder_3d_request_id   BigInt?
   reminder_3d_attempted_at DateTime? @db.Timestamptz(6)
   reminder_3d_attempts     Int       @default(0)
+  update_count             Int       @default(0)
 
   @@map("opportunities")
 }

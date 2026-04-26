@@ -61,6 +61,7 @@ export async function upsertOpportunity(body) {
       stage,
       assigneeEmail,
       lastActivityAt: new Date(),
+      update_count: { increment: 1 },
       // Reset reminders on any activity
       reminder1hSent: false,
       reminder1dSent: false,
