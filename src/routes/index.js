@@ -4,6 +4,7 @@ import rfqRoutes from "./rfq.routes.js";
 import emailRoutes from "./email.routes.js";
 import webhookRoutes from "./webhook.routes.js";
 import reminderRoutes from "./reminder.routes.js";
+import dailySummaryRoutes from "./daily-summary.routes.js";
 
 const router = Router();
 
@@ -12,5 +13,6 @@ router.use("/rfq", rfqRoutes);
 router.use("/email", emailRoutes);
 router.use("/webhook/twenty", webhookRoutes);
 router.use("/send-reminder", reminderRoutes);
+router.use("/daily-summary", dailySummaryRoutes);
 
 export default router;
