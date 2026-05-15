@@ -1,6 +1,28 @@
 import prisma from "../lib/prisma.js";
-import { getOpportunity } from "./twenty.service.js";
+import { getOpportunity, updateOpportunity } from "./twenty.service.js";
 import { findUserByTwentyId } from "./users.service.js";
+
+// Webhook-payload field names whose changes should NOT count as a meaningful
+// updation. `followupcount` is in here because writing it back via PATCH
+// triggers the webhook again — we'd otherwise recurse.
+const IGNORED_DIFF_FIELDS = new Set([
+  "assigned_to",
+  "last_updated",
+  "updatedAt",
+  "updated_at",
+  "followupcount",
+  "followupCount",
+]);
+
+function hasMeaningfulChange(prevData, nextData) {
+  if (!prevData || typeof prevData !== "object") return true;
+  const keys = new Set([...Object.keys(prevData), ...Object.keys(nextData)]);
+  for (const k of keys) {
+    if (IGNORED_DIFF_FIELDS.has(k)) continue;
+    if (JSON.stringify(prevData[k]) !== JSON.stringify(nextData[k])) return true;
+  }
+  return false;
+}
 
 // Prepend creator email and dedupe (case-insensitive). The first entry becomes
 // the To: recipient downstream; the rest are CC'd.
@@ -54,29 +76,54 @@ export async function upsertOpportunity(body) {
 
   const assigneeEmail = deriveEmail(assigned_to);
 
-  await prisma.opportunity.upsert({
+  const existing = await prisma.opportunity.findUnique({
     where: { opportunityId: id },
-    update: {
-      data: body,
-      stage,
-      assigneeEmail,
-      lastActivityAt: new Date(),
-      update_count: { increment: 1 },
-      // Reset reminders on any activity
-      reminder1hSent: false,
-      reminder1dSent: false,
-      reminder3dSent: false,
-      reminder1hFailed: null,
-      reminder1dFailed: null,
-      reminder3dFailed: null,
-    },
+  });
+
+  const isNew = !existing;
+  const meaningful = isNew || hasMeaningfulChange(existing.data, body);
+
+  const updated = await prisma.opportunity.upsert({
+    where: { opportunityId: id },
+    update: meaningful
+      ? {
+          data: body,
+          stage,
+          assigneeEmail,
+          lastActivityAt: new Date(),
+          update_count: { increment: 1 },
+          // Reset reminders on any meaningful activity
+          reminder1hSent: false,
+          reminder1dSent: false,
+          reminder3dSent: false,
+          reminder1hFailed: null,
+          reminder1dFailed: null,
+          reminder3dFailed: null,
+        }
+      : {
+          data: body,
+          stage,
+          assigneeEmail,
+        },
     create: {
       opportunityId: id,
       data: body,
       stage,
       assigneeEmail,
+      update_count: 1,
     },
   });
+
+  // Mirror the count back to Twenty so it shows on the opportunity card.
+  // Only PATCH when the count actually changed — otherwise we'd churn Twenty
+  // and re-trigger the webhook for nothing.
+  if (meaningful) {
+    try {
+      await updateOpportunity(id, { followupcount: updated.update_count });
+    } catch (err) {
+      console.error(`[webhook] followupcount sync failed for ${id}:`, err.message);
+    }
+  }
 
   // Resolve the deal creator and prepend them to the recipients string so
   // they receive every reminder as the primary (To:) recipient. The webhook

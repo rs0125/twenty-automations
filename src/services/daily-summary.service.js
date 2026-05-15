@@ -167,9 +167,10 @@ function buildTextDigest({ opps, window: win }) {
  * - Sends one digest per recipient; skips if no deals.
  *
  * @param {string} window - 'morning' | 'evening'
+ * @param {string} [dryRunEmail] - If provided, all emails are sent to this address instead.
  * @returns {{ sent: number, skipped: number, total: number }}
  */
-export async function processDailySummary({ window: win }) {
+export async function processDailySummary({ window: win, dryRunEmail }) {
   // 1. Fetch all open RFQ_RECEIVED deals with an assignee
   const opps = await prisma.opportunity.findMany({
     where: {
@@ -216,8 +217,9 @@ export async function processDailySummary({ window: win }) {
     const text = buildTextDigest({ opps: assignedOpps, window: win });
 
     try {
-      await sendWithRetry({ to: email, subject, html, text });
-      console.log(`[daily-summary] Sent ${windowLabel} digest to ${email} (${assignedOpps.length} deals)`);
+      const recipient = dryRunEmail || email;
+      await sendWithRetry({ to: recipient, subject, html, text });
+      console.log(`[daily-summary] Sent ${windowLabel} digest for ${email} to ${recipient} (${assignedOpps.length} deals)`);
       sent++;
     } catch (err) {
       console.error(`[daily-summary] Failed to send to ${email}:`, err.message);
