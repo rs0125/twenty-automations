@@ -35,6 +35,10 @@ export async function processRfq(req, res) {
     res.status(201).json({ parsed, crm: result });
   } catch (err) {
     const status = err.status || 500;
+    // err.body holds Twenty's actual rejection detail (set in twenty.service.js).
+    // Log it — otherwise a 400 from Twenty is opaque both here and to the caller.
+    const detail = err.body ? ` body=${JSON.stringify(err.body)}` : "";
+    console.error(`[rfq] create failed: status=${status} ${err.message}${detail}`);
     res.status(status).json({
       error: status >= 500 ? "Internal server error" : err.message,
     });
