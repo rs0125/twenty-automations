@@ -25,7 +25,7 @@ const opportunitySchema = {
       required: ["amountMicros", "currencyCode"],
       additionalProperties: false,
     },
-    stage: { type: "string", enum: ["NEW_LEAD", "RFQ_RECEIVED", "RFQ_NOT_RELEVANT", "PROPOSAL_SHARED", "FOLLOW_UP", "SITE_VISIT", "NEGOTIATION", "DEAL_LOST", "AGREEMENT_WORK", "MONEY_COLLECTION", "DEAL_CLOSED"] },
+    stage: { type: "string", enum: ["NEW_LEAD", "RFQ_RECEIVED", "RFQ_NOT_RELEVANT", "PROPOSAL_SHARED", "FOLLOW_UP"] },
     leadSource: { type: "string", enum: ["GODAMWALE", "BROKER", "WHATSAPP_INBOUND"] },
     duration: { type: "string", enum: ["LONG_TERM", "SHORT_TERM"] },
     city: { type: "string", description: "City mentioned in the RFQ. Use empty string if not mentioned." },
@@ -82,7 +82,7 @@ FIELD INSTRUCTIONS:
 - name: Format STRICTLY as "Company - Space - Area, City". E.g. "Acme Corp - 5,000 sqft - HSR Layout, Bangalore". Space is the area/capacity requested with Indian number formatting (use range if given, e.g. "5,000-10,000 sqft"). Area is the specific locality/area within the city. Use "TBD" for any unknown part.
 - amount.amountMicros: The TOTAL deal size as a plain number string — no multiplication. E.g. Rs 2,20,000 → "220000". 5 lakhs → "500000". 1.5 crore → "15000000". ONLY use this if the total deal value is explicitly mentioned. Use "0" if not mentioned. Do NOT derive this from per-sqft rates.
 - amount.currencyCode: Almost always "INR" unless USD/EUR is explicitly stated.
-- stage: Default to "RFQ_RECEIVED". If the text mentions a stage keyword — even misspelled or informal (e.g. "negotation", "negotiating", "site visit done", "deal lost", "proposal sent", "agreement work", "closed") — map it to the closest matching enum value. Do NOT infer a stage from context; only match when the user explicitly states one.
+- stage: Default to "RFQ_RECEIVED". Valid stages are NEW_LEAD, RFQ_RECEIVED, RFQ_NOT_RELEVANT, PROPOSAL_SHARED, FOLLOW_UP. If the text explicitly mentions a matching keyword — even misspelled or informal (e.g. "proposal sent"/"proposal shared" → PROPOSAL_SHARED, "following up"/"follow up done" → FOLLOW_UP, "not relevant"/"irrelevant"/"spam" → RFQ_NOT_RELEVANT, "new lead" → NEW_LEAD) — map it to that enum value. Do NOT infer a stage from context; only match when the user explicitly states one.
 - leadSource: "GODAMWALE" if Godamwale/platform is mentioned, "BROKER" if a broker/agent/referral is mentioned, "WHATSAPP_INBOUND" if the client reached out directly or source is unclear.
 - duration: "LONG_TERM" if lock-in/duration is 1 year or above, or if duration is not mentioned. "SHORT_TERM" only if explicitly under 1 year, spot, or one-time.
 - city: Exact city name. Use "" if not mentioned.
@@ -149,6 +149,13 @@ FIELD INSTRUCTIONS:
   if (canonical.length) {
     parsed.assignedTo = canonical;
   }
+
+  // Twenty's repeatClient is a multi-select enum ["OPTION1", "NO"] (OPTION1 = repeat
+  // client, NO = not). The LLM gives us a boolean; map it and drop the boolean — Twenty
+  // has no `repeatCustomer` field and would silently ignore it, losing the signal.
+  const isRepeat = parsed.repeatCustomer === true;
+  delete parsed.repeatCustomer;
+  parsed.repeatClient = isRepeat ? ["OPTION1"] : ["NO"];
 
   return parsed;
 }
