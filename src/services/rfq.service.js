@@ -26,7 +26,7 @@ const opportunitySchema = {
       additionalProperties: false,
     },
     stage: { type: "string", enum: ["NEW_LEAD", "RFQ_RECEIVED", "RFQ_NOT_RELEVANT", "PROPOSAL_SHARED", "FOLLOW_UP", "SITE_VISIT", "NEGOTIATION", "DEAL_LOST", "AGREEMENT_WORK", "MONEY_COLLECTION", "DEAL_CLOSED"] },
-    leadSource: { type: "string", enum: ["GODAMWALE", "BROKER", "DIRECT"] },
+    leadSource: { type: "string", enum: ["GODAMWALE", "BROKER", "WHATSAPP_INBOUND"] },
     duration: { type: "string", enum: ["LONG_TERM", "SHORT_TERM"] },
     city: { type: "string", description: "City mentioned in the RFQ. Use empty string if not mentioned." },
     repeatCustomer: { type: "boolean" },
@@ -83,7 +83,7 @@ FIELD INSTRUCTIONS:
 - amount.amountMicros: The TOTAL deal size as a plain number string — no multiplication. E.g. Rs 2,20,000 → "220000". 5 lakhs → "500000". 1.5 crore → "15000000". ONLY use this if the total deal value is explicitly mentioned. Use "0" if not mentioned. Do NOT derive this from per-sqft rates.
 - amount.currencyCode: Almost always "INR" unless USD/EUR is explicitly stated.
 - stage: Default to "RFQ_RECEIVED". If the text mentions a stage keyword — even misspelled or informal (e.g. "negotation", "negotiating", "site visit done", "deal lost", "proposal sent", "agreement work", "closed") — map it to the closest matching enum value. Do NOT infer a stage from context; only match when the user explicitly states one.
-- leadSource: "GODAMWALE" if Godamwale/platform is mentioned, "BROKER" if a broker/agent/referral is mentioned, "DIRECT" if the client reached out directly or source is unclear.
+- leadSource: "GODAMWALE" if Godamwale/platform is mentioned, "BROKER" if a broker/agent/referral is mentioned, "WHATSAPP_INBOUND" if the client reached out directly or source is unclear.
 - duration: "LONG_TERM" if lock-in/duration is 1 year or above, or if duration is not mentioned. "SHORT_TERM" only if explicitly under 1 year, spot, or one-time.
 - city: Exact city name. Use "" if not mentioned.
 - repeatCustomer: true ONLY if the text explicitly says existing client, repeat customer, or similar. Default false.
