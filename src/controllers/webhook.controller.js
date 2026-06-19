@@ -47,13 +47,27 @@ function sanitizeJsonControls(s) {
 
 // Parse the raw webhook body into an object. Throws on malformed input so the
 // caller can log the raw payload rather than silently dropping it.
+//
+// Twenty sends the JSON as an application/x-www-form-urlencoded payload, which
+// arrives percent-encoded (e.g. "%7B%0A++%22id%22..." with '+' for spaces and a
+// trailing '='). Decode that form-encoding first. Some payloads arrive as literal
+// JSON instead — those start with '{' and are parsed directly. In both cases the
+// JSON may contain literal control chars (pretty-printed multi-line strings), so
+// sanitize before JSON.parse.
 function parseWebhookBody(raw) {
   // Defensive: if some upstream parser already produced an object, use it as-is.
   if (raw && typeof raw === "object") return raw;
   if (typeof raw !== "string" || !raw.trim()) {
     throw new Error("empty or non-string body");
   }
-  return JSON.parse(sanitizeJsonControls(raw.trim()));
+  let s = raw.trim();
+  if (!s.startsWith("{")) {
+    // Percent-encoded form payload: the JSON is the (only) form key. URLSearchParams
+    // handles '+'→space and %XX decoding. Internal '&'/'=' are encoded, so no split.
+    const key = new URLSearchParams(s).keys().next().value;
+    if (key) s = key.trim();
+  }
+  return JSON.parse(sanitizeJsonControls(s));
 }
 
 export async function handleTwentyWebhook(req, res) {
